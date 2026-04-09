@@ -3,7 +3,7 @@ session_start();
 require "../config.php";
 
 if (isset($_SESSION["usuario_id"])) {
-    header("Location: mesas.php");
+    header("Location: index.php");
     exit;
 }
 

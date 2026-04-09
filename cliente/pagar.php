@@ -51,6 +51,15 @@ if (!$comanda) {
     die("Nenhuma comanda encontrada para esta mesa.");
 }
 
+/*
+|--------------------------------------------------------------------------
+| VALIDAR TOTAL DA COMANDA
+|--------------------------------------------------------------------------
+*/
+if ((float) $comanda["total"] <= 0) {
+    die("Essa comanda ainda não possui valor para pagamento.");
+}
+
 $mensagem = "";
 $pagamento = null;
 

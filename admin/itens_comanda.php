@@ -38,6 +38,15 @@ if (!$comanda) {
 
 /*
 |--------------------------------------------------------------------------
+| BLOQUEAR COMANDA ENCERRADA
+|--------------------------------------------------------------------------
+*/
+if ($comanda["status"] !== "aberta") {
+    die("Esta comanda não pode mais receber itens.");
+}
+
+/*
+|--------------------------------------------------------------------------
 | ADICIONAR ITEM
 |--------------------------------------------------------------------------
 */
@@ -87,11 +96,15 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["adicionar_item"])) {
                     ":subtotal" => $subtotal
                 ]);
 
-                $sqlTotal = "SELECT SUM(subtotal) AS total FROM comanda_itens WHERE comanda_id = :comanda_id";
+                $sqlTotal = "
+                    SELECT COALESCE(SUM(subtotal), 0) AS total 
+                    FROM comanda_itens 
+                    WHERE comanda_id = :comanda_id
+                ";
                 $stmtTotal = $pdo->prepare($sqlTotal);
                 $stmtTotal->execute([":comanda_id" => $comanda_id]);
                 $resultadoTotal = $stmtTotal->fetch(PDO::FETCH_ASSOC);
-                $novoTotal = $resultadoTotal["total"] ?? 0;
+                $novoTotal = (float) ($resultadoTotal["total"] ?? 0);
 
                 $sqlUpdateComanda = "
                     UPDATE comandas 
@@ -180,7 +193,7 @@ $stmtComandaAtual->execute([
     ":pizzaria_id" => $pizzariaId
 ]);
 $comandaAtual = $stmtComandaAtual->fetch(PDO::FETCH_ASSOC);
-$totalComanda = $comandaAtual["total"] ?? 0;
+$totalComanda = (float) ($comandaAtual["total"] ?? 0);
 ?>
 
 <style>

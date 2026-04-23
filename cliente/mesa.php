@@ -34,7 +34,7 @@ $sqlComanda = "
     FROM comandas 
     WHERE mesa_id = :mesa_id 
       AND pizzaria_id = :pizzaria_id
-      AND status = 'aberta'
+      AND status IN ('aberta', 'paga')
     ORDER BY id DESC
     LIMIT 1
 ";
@@ -476,6 +476,17 @@ if ($comanda) {
             padding: 0 14px 14px;
             margin-top: 0;
         }
+
+        .pagamento-concluido {
+            margin-top: 20px;
+            padding: 14px;
+            background: #163523;
+            border: 1px solid #1f5a37;
+            color: #9dffc5;
+            border-radius: 8px;
+            text-align: center;
+            font-weight: bold;
+        }
     </style>
 </head>
 
@@ -548,17 +559,39 @@ if ($comanda) {
             <div class="barra-total-fixa">
                 <div class="barra-total-info">
                     <span class="barra-total-label">Total atual</span>
-                    <span class="barra-total-valor">R$ <?= number_format((float) $comanda["total"], 2, ",", ".") ?></span>
+                    <span class="barra-total-valor">
+                        R$ <?= number_format((float) $comanda["total"], 2, ",", ".") ?>
+                    </span>
                 </div>
 
-                <a href="pagar.php?token=<?= urlencode($token) ?>" class="botao-fixo">
-                    Pagar agora
-                </a>
+                <?php if ($comanda["status"] === "aberta"): ?>
+                    <a href="pagar.php?token=<?= urlencode($token) ?>" class="botao-fixo">
+                        Pagar agora
+                    </a>
+                <?php elseif ($comanda["status"] === "paga"): ?>
+                    <div class="pagamento-concluido">
+                        Pagamento já realizado com sucesso.
+                    </div>
+                <?php endif; ?>
             </div>
+
         <?php endif; ?>
 
     </div>
 
+    <script>
+        let pausado = false;
+
+        document.addEventListener("visibilitychange", function() {
+            pausado = document.hidden;
+        });
+
+        setInterval(function() {
+            if (!pausado) {
+                window.location.reload();
+            }
+        }, 8000);
+    </script>
 </body>
 
 </html>

@@ -5,6 +5,56 @@ require "layout/header.php";
 
 /*
 |--------------------------------------------------------------------------
+| FILTRO DE FATURAMENTO
+|--------------------------------------------------------------------------
+*/
+$filtroFaturamento = $_GET["faturamento"] ?? "mensal";
+$tituloFaturamento = "Faturamento mensal";
+
+$sqlFaturamentoPeriodo = "";
+$paramsFaturamentoPeriodo = [":pizzaria_id" => $pizzariaId];
+
+if ($filtroFaturamento === "semanal") {
+    $tituloFaturamento = "Faturamento semanal";
+
+    $sqlFaturamentoPeriodo = "
+        SELECT COALESCE(SUM(total), 0) AS total_periodo
+        FROM comandas
+        WHERE pizzaria_id = :pizzaria_id
+          AND status IN ('fechada', 'paga')
+          AND YEARWEEK(updated_at, 1) = YEARWEEK(CURDATE(), 1)
+    ";
+} elseif ($filtroFaturamento === "anual") {
+    $tituloFaturamento = "Faturamento anual";
+
+    $sqlFaturamentoPeriodo = "
+        SELECT COALESCE(SUM(total), 0) AS total_periodo
+        FROM comandas
+        WHERE pizzaria_id = :pizzaria_id
+          AND status IN ('fechada', 'paga')
+          AND YEAR(updated_at) = YEAR(CURDATE())
+    ";
+} else {
+    $filtroFaturamento = "mensal";
+    $tituloFaturamento = "Faturamento mensal";
+
+    $sqlFaturamentoPeriodo = "
+        SELECT COALESCE(SUM(total), 0) AS total_periodo
+        FROM comandas
+        WHERE pizzaria_id = :pizzaria_id
+          AND status IN ('fechada', 'paga')
+          AND MONTH(updated_at) = MONTH(CURDATE())
+          AND YEAR(updated_at) = YEAR(CURDATE())
+    ";
+}
+
+$stmtFaturamentoPeriodo = $pdo->prepare($sqlFaturamentoPeriodo);
+$stmtFaturamentoPeriodo->execute($paramsFaturamentoPeriodo);
+$faturamentoPeriodo = $stmtFaturamentoPeriodo->fetch(PDO::FETCH_ASSOC);
+$valorFaturamentoPeriodo = (float) ($faturamentoPeriodo["total_periodo"] ?? 0);
+
+/*
+|--------------------------------------------------------------------------
 | CONTADORES DE MESAS
 |--------------------------------------------------------------------------
 */
@@ -41,13 +91,13 @@ $totalComandasAbertas = $stmt->fetchColumn() ?? 0;
 |--------------------------------------------------------------------------
 */
 $stmt = $pdo->prepare("
-    SELECT SUM(total)
+    SELECT COALESCE(SUM(total), 0)
     FROM comandas
     WHERE pizzaria_id = :pizzaria_id
       AND status IN ('fechada', 'paga')
 ");
 $stmt->execute([":pizzaria_id" => $pizzariaId]);
-$faturamentoTotal = $stmt->fetchColumn() ?? 0;
+$faturamentoTotal = (float) ($stmt->fetchColumn() ?? 0);
 
 /*
 |--------------------------------------------------------------------------
@@ -55,14 +105,14 @@ $faturamentoTotal = $stmt->fetchColumn() ?? 0;
 |--------------------------------------------------------------------------
 */
 $stmt = $pdo->prepare("
-    SELECT SUM(total)
+    SELECT COALESCE(SUM(total), 0)
     FROM comandas
     WHERE pizzaria_id = :pizzaria_id
       AND status IN ('fechada', 'paga')
       AND DATE(updated_at) = CURDATE()
 ");
 $stmt->execute([":pizzaria_id" => $pizzariaId]);
-$faturamentoHoje = $stmt->fetchColumn() ?? 0;
+$faturamentoHoje = (float) ($stmt->fetchColumn() ?? 0);
 
 /*
 |--------------------------------------------------------------------------
@@ -87,18 +137,39 @@ $ultimasComandas = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <style>
+    .page-card {
+        margin-bottom: 20px;
+        background: #fff;
+        padding: 28px;
+        border-radius: 18px;
+        box-shadow: 0 0 18px rgba(0, 0, 0, 0.06);
+        color: #222;
+    }
+
+    .page-card h1 {
+        margin: 0 0 6px;
+        font-size: 38px;
+    }
+
+    .page-card p {
+        margin: 0;
+        font-size: 18px;
+        color: #444;
+    }
+
     .dashboard-grid {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 20px;
-        margin-bottom: 25px;
+        gap: 24px;
+        margin-bottom: 30px;
     }
 
     .dashboard-card {
         background: #fff;
         border-radius: 14px;
         padding: 20px;
-        box-shadow: 0 0 10px rgba(0,0,0,0.08);
+        min-width: 235px;
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.08);
         color: #222;
     }
 
@@ -122,7 +193,7 @@ $ultimasComandas = $stmt->fetchAll(PDO::FETCH_ASSOC);
         background: #fff;
         border-radius: 14px;
         padding: 20px;
-        box-shadow: 0 0 10px rgba(0,0,0,0.08);
+        box-shadow: 0 0 10px rgba(0, 0, 0, 0.08);
         color: #222;
     }
 
@@ -168,6 +239,44 @@ $ultimasComandas = $stmt->fetchAll(PDO::FETCH_ASSOC);
         border-radius: 10px;
         background: #fafafa;
     }
+
+    .card-topo {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        margin-bottom: 12px;
+    }
+
+    .card-topo h3 {
+        margin: 0;
+        font-size: 16px;
+        color: #555;
+    }
+
+    .filtro-faturamento select {
+        padding: 8px 10px;
+        border-radius: 8px;
+        border: 1px solid #ccc;
+        font-size: 14px;
+        background: #fff;
+        cursor: pointer;
+    }
+
+    @media (max-width: 768px) {
+        .card-topo {
+            flex-direction: column;
+            align-items: flex-start;
+        }
+
+        .filtro-faturamento select {
+            width: 100%;
+        }
+
+        .dashboard-section table {
+            font-size: 14px;
+        }
+    }
 </style>
 
 <div class="page-card">
@@ -199,6 +308,22 @@ $ultimasComandas = $stmt->fetchAll(PDO::FETCH_ASSOC);
     <div class="dashboard-card">
         <h3>Faturamento de hoje</h3>
         <div class="valor money">R$ <?= number_format($faturamentoHoje, 2, ",", ".") ?></div>
+    </div>
+
+    <div class="dashboard-card">
+        <div class="card-topo">
+            <h3><?= htmlspecialchars($tituloFaturamento) ?></h3>
+
+            <form method="GET" class="filtro-faturamento">
+                <select name="faturamento" onchange="this.form.submit()">
+                    <option value="semanal" <?= $filtroFaturamento === "semanal" ? "selected" : "" ?>>Semanal</option>
+                    <option value="mensal" <?= $filtroFaturamento === "mensal" ? "selected" : "" ?>>Mensal</option>
+                    <option value="anual" <?= $filtroFaturamento === "anual" ? "selected" : "" ?>>Anual</option>
+                </select>
+            </form>
+        </div>
+
+        <div class="valor money">R$ <?= number_format($valorFaturamentoPeriodo, 2, ",", ".") ?></div>
     </div>
 </div>
 

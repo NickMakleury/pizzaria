@@ -47,6 +47,111 @@ if ($comanda["status"] !== "aberta") {
 
 /*
 |--------------------------------------------------------------------------
+| AÇÕES NOS ITENS (+1, -1, remover)
+|--------------------------------------------------------------------------
+*/
+if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["acao_item"])) {
+    $item_id = (int) ($_POST["item_id"] ?? 0);
+    $acao = $_POST["acao_item"] ?? "";
+
+    if ($item_id > 0) {
+        try {
+            $pdo->beginTransaction();
+
+            $sqlItem = "
+                SELECT * 
+                FROM comanda_itens
+                WHERE id = :item_id
+                  AND comanda_id = :comanda_id
+                LIMIT 1
+            ";
+            $stmtItem = $pdo->prepare($sqlItem);
+            $stmtItem->execute([
+                ":item_id" => $item_id,
+                ":comanda_id" => $comanda_id
+            ]);
+            $item = $stmtItem->fetch(PDO::FETCH_ASSOC);
+
+            if (!$item) {
+                throw new Exception("Item não encontrado.");
+            }
+
+            $quantidade = (int) $item["quantidade"];
+            $preco = (float) $item["preco_unitario"];
+
+            if ($acao === "mais") {
+                $quantidade++;
+            } elseif ($acao === "menos") {
+                $quantidade--;
+            } elseif ($acao === "remover") {
+                $quantidade = 0;
+            }
+
+            if ($quantidade <= 0) {
+                $sqlDelete = "
+                    DELETE FROM comanda_itens
+                    WHERE id = :id
+                      AND comanda_id = :comanda_id
+                ";
+                $stmtDelete = $pdo->prepare($sqlDelete);
+                $stmtDelete->execute([
+                    ":id" => $item_id,
+                    ":comanda_id" => $comanda_id
+                ]);
+            } else {
+                $subtotal = $quantidade * $preco;
+
+                $sqlUpdateItem = "
+                    UPDATE comanda_itens
+                    SET quantidade = :quantidade,
+                        subtotal = :subtotal
+                    WHERE id = :id
+                      AND comanda_id = :comanda_id
+                ";
+                $stmtUpdateItem = $pdo->prepare($sqlUpdateItem);
+                $stmtUpdateItem->execute([
+                    ":quantidade" => $quantidade,
+                    ":subtotal" => $subtotal,
+                    ":id" => $item_id,
+                    ":comanda_id" => $comanda_id
+                ]);
+            }
+
+            $sqlTotal = "
+                SELECT COALESCE(SUM(subtotal), 0) AS total
+                FROM comanda_itens
+                WHERE comanda_id = :comanda_id
+            ";
+            $stmtTotal = $pdo->prepare($sqlTotal);
+            $stmtTotal->execute([":comanda_id" => $comanda_id]);
+            $novoTotal = (float) ($stmtTotal->fetch(PDO::FETCH_ASSOC)["total"] ?? 0);
+
+            $sqlUpdateComanda = "
+                UPDATE comandas
+                SET total = :total
+                WHERE id = :comanda_id
+                  AND pizzaria_id = :pizzaria_id
+            ";
+            $stmtUpdateComanda = $pdo->prepare($sqlUpdateComanda);
+            $stmtUpdateComanda->execute([
+                ":total" => $novoTotal,
+                ":comanda_id" => $comanda_id,
+                ":pizzaria_id" => $pizzariaId
+            ]);
+
+            $pdo->commit();
+
+            header("Location: itens_comanda.php?comanda_id=" . $comanda_id . "&atualizado=1");
+            exit;
+        } catch (Throwable $e) {
+            $pdo->rollBack();
+            $mensagem = "Erro ao atualizar item.";
+        }
+    }
+}
+
+/*
+|--------------------------------------------------------------------------
 | ADICIONAR ITEM
 |--------------------------------------------------------------------------
 */
@@ -76,25 +181,63 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["adicionar_item"])) {
             $mensagem = "Produto inválido.";
         } else {
             $preco_unitario = (float) $produto["preco"];
-            $subtotal = $preco_unitario * $quantidade;
 
             try {
                 $pdo->beginTransaction();
 
-                $sqlInsert = "
-                    INSERT INTO comanda_itens 
-                    (comanda_id, produto_id, quantidade, preco_unitario, subtotal)
-                    VALUES
-                    (:comanda_id, :produto_id, :quantidade, :preco_unitario, :subtotal)
+                /*
+                |--------------------------------------------------------------------------
+                | VERIFICAR SE PRODUTO JÁ EXISTE NA COMANDA
+                |--------------------------------------------------------------------------
+                */
+                $sqlExiste = "
+                    SELECT * 
+                    FROM comanda_itens
+                    WHERE comanda_id = :comanda_id
+                      AND produto_id = :produto_id
+                    LIMIT 1
                 ";
-                $stmtInsert = $pdo->prepare($sqlInsert);
-                $stmtInsert->execute([
+                $stmtExiste = $pdo->prepare($sqlExiste);
+                $stmtExiste->execute([
                     ":comanda_id" => $comanda_id,
-                    ":produto_id" => $produto_id,
-                    ":quantidade" => $quantidade,
-                    ":preco_unitario" => $preco_unitario,
-                    ":subtotal" => $subtotal
+                    ":produto_id" => $produto_id
                 ]);
+                $itemExistente = $stmtExiste->fetch(PDO::FETCH_ASSOC);
+
+                if ($itemExistente) {
+                    $novaQuantidade = (int) $itemExistente["quantidade"] + $quantidade;
+                    $novoSubtotal = $novaQuantidade * $preco_unitario;
+
+                    $sqlUpdateExistente = "
+                        UPDATE comanda_itens
+                        SET quantidade = :quantidade,
+                            subtotal = :subtotal
+                        WHERE id = :id
+                    ";
+                    $stmtUpdateExistente = $pdo->prepare($sqlUpdateExistente);
+                    $stmtUpdateExistente->execute([
+                        ":quantidade" => $novaQuantidade,
+                        ":subtotal" => $novoSubtotal,
+                        ":id" => $itemExistente["id"]
+                    ]);
+                } else {
+                    $subtotal = $preco_unitario * $quantidade;
+
+                    $sqlInsert = "
+                        INSERT INTO comanda_itens 
+                        (comanda_id, produto_id, quantidade, preco_unitario, subtotal)
+                        VALUES
+                        (:comanda_id, :produto_id, :quantidade, :preco_unitario, :subtotal)
+                    ";
+                    $stmtInsert = $pdo->prepare($sqlInsert);
+                    $stmtInsert->execute([
+                        ":comanda_id" => $comanda_id,
+                        ":produto_id" => $produto_id,
+                        ":quantidade" => $quantidade,
+                        ":preco_unitario" => $preco_unitario,
+                        ":subtotal" => $subtotal
+                    ]);
+                }
 
                 $sqlTotal = "
                     SELECT COALESCE(SUM(subtotal), 0) AS total 
@@ -138,6 +281,14 @@ if ($_SERVER["REQUEST_METHOD"] === "POST" && isset($_POST["adicionar_item"])) {
 */
 if (isset($_GET["sucesso"])) {
     $mensagem = "Item lançado com sucesso!";
+}
+
+if (isset($_GET["removido"])) {
+    $mensagem = "Item removido com sucesso!";
+}
+
+if (isset($_GET["atualizado"])) {
+    $mensagem = "Item atualizado com sucesso!";
 }
 
 /*
@@ -297,6 +448,7 @@ $totalComanda = (float) ($comandaAtual["total"] ?? 0);
         border-bottom: 1px solid #ddd;
         text-align: left;
         color: #222;
+        vertical-align: middle;
     }
 
     .page-card th {
@@ -330,6 +482,47 @@ $totalComanda = (float) ($comandaAtual["total"] ?? 0);
         color: #222;
     }
 
+    .acoes-item {
+        display: flex;
+        gap: 6px;
+        flex-wrap: wrap;
+    }
+
+    .btn-menos {
+        background: #ffc107 !important;
+        color: #222 !important;
+    }
+
+    .btn-menos:hover {
+        background: #d39e00 !important;
+    }
+
+    .btn-mais {
+        background: #28a745 !important;
+    }
+
+    .btn-mais:hover {
+        background: #1e7e34 !important;
+    }
+
+    .btn-remover {
+        background: #dc3545 !important;
+    }
+
+    .btn-remover:hover {
+        background: #b02a37 !important;
+    }
+
+    .acoes-item form {
+        margin: 0;
+    }
+
+    .acoes-item button {
+        min-width: 46px;
+        height: 38px;
+        padding: 0 10px;
+    }
+
     @media (max-width: 768px) {
         .form-itens {
             grid-template-columns: 1fr;
@@ -344,6 +537,10 @@ $totalComanda = (float) ($comandaAtual["total"] ?? 0);
         }
 
         .topo {
+            flex-direction: column;
+        }
+
+        .acoes-item {
             flex-direction: column;
         }
     }
@@ -413,6 +610,7 @@ $totalComanda = (float) ($comandaAtual["total"] ?? 0);
                     <th>Preço unitário</th>
                     <th>Subtotal</th>
                     <th>Lançado em</th>
+                    <th>Ações</th>
                 </tr>
             </thead>
             <tbody>
@@ -420,10 +618,28 @@ $totalComanda = (float) ($comandaAtual["total"] ?? 0);
                     <tr>
                         <td><?= htmlspecialchars($item["nome_produto"]) ?></td>
                         <td><?= htmlspecialchars($item["categoria"]) ?></td>
-                        <td><?= $item["quantidade"] ?></td>
+                        <td><?= (int) $item["quantidade"] ?></td>
                         <td class="preco">R$ <?= number_format($item["preco_unitario"], 2, ",", ".") ?></td>
                         <td class="preco">R$ <?= number_format($item["subtotal"], 2, ",", ".") ?></td>
                         <td><?= date("d/m/Y H:i", strtotime($item["created_at"])) ?></td>
+                        <td>
+                            <div class="acoes-item">
+                                <form method="POST">
+                                    <input type="hidden" name="item_id" value="<?= $item["id"] ?>">
+                                    <button class="btn-menos" type="submit" name="acao_item" value="menos">-1</button>
+                                </form>
+
+                                <form method="POST">
+                                    <input type="hidden" name="item_id" value="<?= $item["id"] ?>">
+                                    <button class="btn-mais" type="submit" name="acao_item" value="mais">+1</button>
+                                </form>
+
+                                <form method="POST" onsubmit="return confirm('Deseja remover este item por completo da comanda?');">
+                                    <input type="hidden" name="item_id" value="<?= $item["id"] ?>">
+                                    <button class="btn-remover" type="submit" name="acao_item" value="remover">Remover</button>
+                                </form>
+                            </div>
+                        </td>
                     </tr>
                 <?php endforeach; ?>
             </tbody>
